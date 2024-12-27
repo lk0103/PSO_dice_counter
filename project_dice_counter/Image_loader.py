@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
-class Images:
+class Image_loader:
     def __init__(self):
         self.val_dir = "./dataset/validation_dataset/"
         self.val_images = self.list_files(self.val_dir)
@@ -24,7 +24,3 @@ class Images:
         plt.axis('off')
         plt.show()
 
-print(Images().val_images)
-print(Images().test_images)
-print(Images().val_dir)
-print(Images().test_dir)
