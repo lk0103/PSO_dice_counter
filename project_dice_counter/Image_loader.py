@@ -21,6 +21,9 @@ class ImageLoader():
         return files
 
     def show(self, img, title=None):
+        if self.is_grayscale(img):
+            self.show_gray(img, title)
+            return
         plt.imshow(img[:, :, ::-1])
         plt.title(title)
         plt.axis('off')
@@ -31,4 +34,17 @@ class ImageLoader():
         plt.title(title)
         plt.axis('off')
         plt.show()
+
+    def is_grayscale(self, img):
+        return len(img.shape) == 2
+
+    def extract_dice_rolls(self, file_path):
+        file_name = os.path.basename(file_path)
+
+        name_without_ext = os.path.splitext(file_name)[0]
+
+        rolls = list(map(int, name_without_ext.split('_')[-6:]))
+        rolls_sum = sum(rolls)
+
+        return rolls, rolls_sum
 
