@@ -48,3 +48,6 @@ class ImageLoader():
 
         return rolls, rolls_sum
 
+
+
+
