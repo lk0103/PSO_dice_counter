@@ -67,6 +67,15 @@ class KmeansSegmentation():
 
         return new_img, centers
 
+    def compare_dice_rolls(self, found_rolls, correct_rolls):
+
+        # Measure 1: Count of incorrectly identified dice rolls
+        incorrect_rolls = sum(1 for f, c in zip(found_rolls, correct_rolls) if f != c)
+
+        # Measure 2: Total difference in dice rolls
+        roll_difference = sum(abs(f - c) for f, c in zip(found_rolls, correct_rolls))
+
+        return incorrect_rolls, roll_difference
 
     def find_closest_to_black_mask(self, posterized_img, centers):
         black_lab = np.array([0, 128, 128], dtype=np.float32)  # Black in LAB color space
@@ -88,6 +97,20 @@ class KmeansSegmentation():
 
 
         return mask, mask_values
+
+    def find_and_filter_contours(self, img):
+        images_class = ImageLoader()
+
+        cnt, h = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # images_class.show(img, 'Image with {} circles'.format(len(cnt)))
+        filtered_contours = self.filter_circles_by_shape_and_area(cnt, min_circularity=0.85, area_tolerance=0.8)
+
+        output_img = np.zeros_like(img)
+        output_img = cv2.drawContours(output_img, filtered_contours, -1, 255, thickness=cv2.FILLED)
+        # Display results
+        #images_class.show(output_img, 'Filtered Image with {} circles'.format(len(filtered_contours)))
+
+        return filtered_contours, len(filtered_contours), output_img
 
     def filter_circles_by_shape_and_area(self, contours, min_circularity=0.7, area_tolerance=0.2):
         valid_contours = []
@@ -138,169 +161,145 @@ class KmeansSegmentation():
         centroids = np.array(centroids, dtype=np.float32)
 
         # Define K-means criteria
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 200, 0.05)
 
         # Apply K-means clustering
-        _, labels, centers = cv2.kmeans(centroids, n_clusters, None, criteria, 3, cv2.KMEANS_RANDOM_CENTERS)
+        _, labels, centers = cv2.kmeans(centroids, n_clusters, None, criteria, 5, cv2.KMEANS_RANDOM_CENTERS)
 
         # Count the number of contours in each cluster
         cluster_counts = np.bincount(labels.flatten(), minlength=n_clusters)
 
         # Sort the cluster counts in ascending order
-        sorted_counts = list(map(int, sorted(cluster_counts)))
+        #sorted_counts = list(map(int, sorted(cluster_counts)))
         sorted_counts = [min(int(x), 6) for x in sorted(cluster_counts)]
 
-        return sorted_counts
+        return sorted_counts, centers
 
-    def black_hat_dataset(self):
+    def test_val_dataset(self, binarization_method='blackhat'):
         images_class = ImageLoader()
 
-        mistakes = 0
+        count_diff_point_sum = 0
+        incorrect_rolls_total = 0
+        roll_difference_total = 0
 
         for img_path in images_class.val_images:
             # if img_path[-19:-16] not in ('d12', 'd19'): #('d12', 'd17', 'd24'):
             #     continue
-            print(img_path)
-            img = cv2.imread(img_path)
+            if binarization_method == 'blackhat':
+                open_img = self.blackhat_point_extraction(img_path)
+            else:
+                open_img = self.kmeans_extract_points(images_class, img_path)
 
-            img = cv2.medianBlur(img, 41)
-            # images_class.show(img, title='original')
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            #images_class.show(img, title='original')
-
-            se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (55, 55))
-            blackhat_img = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, se)
-            #images_class.show(blackhat_img, title='original')
-
-            se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (30, 30))
-            open_img = cv2.morphologyEx(blackhat_img, cv2.MORPH_OPEN, se)
-            #images_class.show(open_img, title='opened')
-
-            #bin_img = cv2.adaptiveThreshold(open_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 35, 2)
-            _, bin_img = cv2.threshold(open_img, 10, 255, cv2.THRESH_BINARY)
-            #images_class.show(bin_img, title='binarized')
-            #iba obrazok 6 a 8 nemaju vsetky bodky
-
-            se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (28, 28))
-            open_img = cv2.morphologyEx(bin_img, cv2.MORPH_ERODE, se)
-            #images_class.show(open_img, title='eroded')
-
-            contours, num_contours = self.find_and_filter_contours(open_img)
+            contours, num_contours, final_image = self.find_and_filter_contours(open_img)
 
             rolls, rolls_sum = images_class.extract_dice_rolls(img_path)
 
-            mistakes += abs(num_contours - rolls_sum)
+            count_diff_point_sum += abs(num_contours - rolls_sum)
 
             print(f'number of contours = {num_contours}, correct roll sum = {rolls_sum}')
 
-            counts = self.cluster_contours_and_count_cv2(contours)
+            counts, centers = self.cluster_contours_and_count_cv2(contours)
             print("Ordered contour counts by cluster:", counts, ' correct rolls: ', rolls)
+            incorrect_rolls, roll_difference = self.compare_dice_rolls(counts, rolls)
+            incorrect_rolls_total += incorrect_rolls
+            roll_difference_total += roll_difference
+            print(f"Incorrect dice rolls: {incorrect_rolls}, Difference of rolls: {roll_difference}\n")
 
-        print(f'\n number of mistakes in total number of cicles = {mistakes}')
+            final_image = cv2.cvtColor(final_image, cv2.COLOR_GRAY2BGR)
+            for center in centers:
+                center = tuple(map(int, center))  # Convert to integer coordinates
+                cv2.circle(final_image, center, radius=7, color=(0, 0, 255), thickness=-1)  # Red filled circle
 
-    def find_and_filter_contours(self, img):
-        images_class = ImageLoader()
+            # Show the image with centers drawn
+            images_class.show(final_image, title='Centers drawn')
 
-        cnt, h = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # images_class.show(img, 'Image with {} circles'.format(len(cnt)))
-        filtered_contours = self.filter_circles_by_shape_and_area(cnt, min_circularity=0.7, area_tolerance=1.5)
+        print(f'\n number of count_diff_point_sum in total number of cicles = {count_diff_point_sum}')
 
-        output_img = np.zeros_like(img)
-        output_img = cv2.drawContours(output_img, filtered_contours, -1, 255, thickness=cv2.FILLED)
-        # Display results
-        #images_class.show(output_img, 'Filtered Image with {} circles'.format(len(filtered_contours)))
+        total_dices = len(images_class.val_images) * 6
+        correct_rolls_total = total_dices - incorrect_rolls_total
+        accuracy = correct_rolls_total / total_dices
+        print(f"Total number of incorrectly identified dice rolls: {incorrect_rolls_total}, Total number of correctly identified dice rolls: {correct_rolls_total}")
+        print(f"accuracy = {accuracy}")
+        print(f"Total difference of incorrectly identified rolls: {roll_difference_total}\n")
 
-        return filtered_contours, len(filtered_contours)
+    def blackhat_point_extraction(self, img_path):
+        blackhat_img = self.blackhat_gray_image(img_path)
+        # images_class.show(blackhat_img, title='original')
 
-    def posterize_dataset(self):
-        images_class = ImageLoader()
+        se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (28, 28))
+        open_img = cv2.morphologyEx(blackhat_img, cv2.MORPH_ERODE, se)
+        # images_class.show(open_img, title='eroded')
+        return open_img
 
-        for img_path in images_class.val_images:
-            # if img_path[-19:-16] not in ('d12', 'd19'): #('d12', 'd17', 'd24'):
-            #     continue
-            print(img_path)
-            img = cv2.imread(img_path)
+    def blackhat_gray_image(self, img_path):
+        print(img_path)
+        img = cv2.imread(img_path)
+        img = cv2.medianBlur(img, 41)
+        # images_class.show(img, title='original')
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # images_class.show(img, title='original')
+        se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (55, 55))
+        blackhat_img = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, se)
 
-            img = cv2.medianBlur(img, 41)
-            #images_class.show(img, title='original')
+        se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (30, 30))
+        open_img = cv2.morphologyEx(blackhat_img, cv2.MORPH_OPEN, se)
+        # images_class.show(open_img, title='opened')
 
-            gray = False
-            if gray:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                posterized_img, centers = self.segment_k_means(img, 3)
-                # images_class.show(posterized_img, title='segmented')
+        _, bin_img = cv2.threshold(open_img, 10, 255, cv2.THRESH_BINARY)
+        # images_class.show(bin_img, title='binarized')
+        return bin_img
 
-                mask, mask_darkest = self.find_closest_to_black_mask_grayscale(posterized_img)
-                # images_class.show_gray(mask_darkest, title='masked')
-            else:
-                posterized_img, centers = self.segment_k_means(img, 3, cv2.COLOR_BGR2Lab, cv2.COLOR_Lab2BGR)
-                # images_class.show(posterized_img, title='segmented')
+    def kmeans_extract_points(self, images_class, img_path):
+        print(img_path)
+        img = cv2.imread(img_path)
+        img = cv2.medianBlur(img, 41)
+        # images_class.show(img, title='original')
+        gray = False
+        if gray:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            posterized_img, centers = self.segment_k_means(img, 3)
+            # images_class.show(posterized_img, title='segmented')
 
-                mask, mask_darkest = self.find_closest_to_black_mask(posterized_img, centers)
-                # images_class.show_gray(mask_darkest, title='masked')
-
-
-            masked_img = np.full_like(posterized_img, 255)
-            masked_img[mask] = img[mask]
-            if gray:
-                images_class.show_gray(masked_img, title='segmented')
-            else:
-                images_class.show(masked_img, title='segmented')
-
-
-            posterized_masked, centers = self.segment_k_means_masked(mask=mask, img=masked_img, k=7,
-                                                                     conversion=cv2.COLOR_BGR2GRAY,
-                                                                     reverse_conversion=cv2.COLOR_GRAY2BGR)
-            #images_class.show(posterized_masked, title='second kmeans masked')
-
-            mask, mask_darkest = self.find_closest_to_black_mask_grayscale(posterized_masked)
-            images_class.show_gray(mask_darkest, title='second kmeans darkest color')
-
-            se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (48, 48))
-
-            tophat_img = cv2.morphologyEx(mask_darkest, cv2.MORPH_TOPHAT, se)
-
-
-            #a odstranit contoury, ktore maju obsah vacsi ako nejaka hodnota !!!!!!!!!!!!!!!!
-            #!!!!!!!!!!!!!!!!!!!!!!
-
-            # se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            # changed = cv2.morphologyEx(tophat_img, cv2.MORPH_CLOSE, se)
-            images_class.show_gray(tophat_img, title='changed')
-
-            # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
-            # mask_darkest = cv2.morphologyEx(mask_darkest, cv2.MORPH_OPEN, kernel, iterations=2)
-            # #opened_img = cv2.morphologyEx(opened_img, cv2.MORPH_ERODE, kernel)
+            mask, mask_darkest = self.find_closest_to_black_mask_grayscale(posterized_img)
             # images_class.show_gray(mask_darkest, title='masked')
+        else:
+            posterized_img, centers = self.segment_k_means(img, 3, cv2.COLOR_BGR2Lab, cv2.COLOR_Lab2BGR)
+            # images_class.show(posterized_img, title='segmented')
 
-            # hit_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (50, 50))
-            # hit_kernel = np.where(hit_kernel == 0, -1, 1)
-            # hit_result = cv2.morphologyEx(opened_img, cv2.MORPH_HITMISS, hit_kernel)
-            # images_class.show_gray(hit_result, title='masked')
-
-            # hit_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
-            # hit_result = cv2.morphologyEx(hit_result, cv2.MORPH_HITMISS, hit_kernel)
-            # images_class.show_gray(hit_result, title='masked')
-
-            #images_class.show_gray(hit_result, title='masked')
-
-    def masking(self, images_class, img, mask):
-        masked_img = np.zeros_like(img)
+            mask, mask_darkest = self.find_closest_to_black_mask(posterized_img, centers)
+            # images_class.show_gray(mask_darkest, title='masked')
+        masked_img = np.full_like(posterized_img, 255)
         masked_img[mask] = img[mask]
-        # images_class.show(masked_img, title='segmented')
-        masked_img = cv2.cvtColor(masked_img, cv2.COLOR_BGR2GRAY)
-        adaptive_thresh = cv2.adaptiveThreshold(
-            masked_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-        )
-        adaptive_thresh = 255 - adaptive_thresh
-        images_class.show_gray(adaptive_thresh, title='segmented')
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (30, 30))  # Circular kernel (adjust size)
-        # Closing operation (fill the circles)
-        closed = cv2.morphologyEx(adaptive_thresh, cv2.MORPH_CLOSE, kernel)
-        images_class.show_gray(closed, title='segmented')
-        opened_image = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel)
-        images_class.show_gray(opened_image, title='segmented')
+        # if gray:
+        #     images_class.show_gray(masked_img, title='segmented')
+        # else:
+        #     images_class.show(masked_img, title='segmented')
+        posterized_masked, centers = self.segment_k_means_masked(mask=mask, img=masked_img, k=7,
+                                                                 conversion=cv2.COLOR_BGR2GRAY,
+                                                                 reverse_conversion=cv2.COLOR_GRAY2BGR)
+        # images_class.show(posterized_masked, title='second kmeans masked')
+        mask, mask_darkest = self.find_closest_to_black_mask_grayscale(posterized_masked)
+        #images_class.show_gray(mask_darkest, title='second kmeans darkest color')
+
+        blackhat_img = self.blackhat_gray_image(img_path)
+        blackhat_img = (blackhat_img > 0).astype(np.uint8)
+
+        se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (20, 20))
+        img_dil = cv2.morphologyEx(mask_darkest, cv2.MORPH_DILATE, se)
+
+        conditional = img_dil * blackhat_img
+        final_img = np.where(mask_darkest == 0, conditional, mask_darkest)
+        #images_class.show(final_img, title='conditional')
 
 
-# KmeansSegmentation().posterize_dataset()
-KmeansSegmentation().black_hat_dataset()
+        se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
+        open_img = cv2.morphologyEx(final_img, cv2.MORPH_OPEN, se)
+        #images_class.show(open_img, title='opened')
+
+        # se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        # open_img = cv2.morphologyEx(open_img, cv2.MORPH_ERODE, se)
+
+        return open_img
+
+
+KmeansSegmentation().test_val_dataset('kmeans')
