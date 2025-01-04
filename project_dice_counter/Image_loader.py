@@ -38,7 +38,7 @@ class ImageLoader():
     def is_grayscale(self, img):
         return len(img.shape) == 2
 
-    def extract_dice_rolls(self, file_path):
+    def extract_dice_rolls_from_filename(self, file_path):
         file_name = os.path.basename(file_path)
 
         name_without_ext = os.path.splitext(file_name)[0]
