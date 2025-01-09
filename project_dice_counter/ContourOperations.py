@@ -99,7 +99,7 @@ class ContourOperations():
         final_image = cv2.cvtColor(final_image, cv2.COLOR_GRAY2BGR)
         for center in centers:
             center = tuple(map(int, center))  # Convert to integer coordinates
-            cv2.circle(final_image, center, radius=7, color=(0, 0, 255), thickness=-1)  # Red filled circle
+            cv2.circle(final_image, center, radius=7, color=(0, 255, 0), thickness=-1)  # Red filled circle
         # Show the image with centers drawn
         if self.show:
             self.image_loader.show(final_image, title='Centers of clusters')
