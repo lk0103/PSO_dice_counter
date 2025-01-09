@@ -35,8 +35,8 @@ class KmeansSegmentation():
     def kmeans_find_dice_points(self):
         print(self.img_path)
         img = self.median_blur_image()
-        # if self.show:
-        #     self.image_loader.show(img, title='median blur')
+        if self.show:
+            self.image_loader.show(img, title='median blur')
 
         binary_mask_darkest, rgb_mask_darkest = self.kmeans_rgb_colors_find_darkest(img)
 
@@ -46,8 +46,8 @@ class KmeansSegmentation():
 
         se = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, self.open_s)
         open_img = cv2.morphologyEx(cond_dilated_img, cv2.MORPH_OPEN, se)
-        # if self.show:
-        #     self.image_loader.show(open_img, title='opened')
+        if self.show:
+            self.image_loader.show(open_img, title='opened')
 
         return open_img
 
@@ -154,8 +154,8 @@ class KmeansSegmentation():
 
         rgb_mask_darkest = np.full_like(posterized_img, 255)
         rgb_mask_darkest[binary_mask_darkest] = img[binary_mask_darkest]
-        # if self.show:
-        #     self.image_loader.show(rgb_mask_darkest, title='mask darkest color - in original colors')
+        if self.show:
+            self.image_loader.show(rgb_mask_darkest, title='mask darkest color - in original colors')
         return binary_mask_darkest, rgb_mask_darkest
 
     def kmeans_grayscale_find_darkest(self, binary_mask_darkest, rgb_mask_darkest):
@@ -166,8 +166,8 @@ class KmeansSegmentation():
         # if self.show:
         #     self.image_loader.show(posterized_masked, title='grayscale kmeans on masked image')
         mask_darkest = self.find_closest_to_black_mask_grayscale(posterized_masked)
-        # if self.show:
-        #     self.image_loader.show_gray(mask_darkest, title='grayscale kmeans darkest color')
+        if self.show:
+            self.image_loader.show_gray(mask_darkest, title='grayscale kmeans darkest color')
         return mask_darkest
 
     def conditional_dilation(self, mask_darkest):
